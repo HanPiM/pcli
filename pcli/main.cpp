@@ -7,11 +7,6 @@
 #include <iostream>
 #include <thread>
 
-#   include <unistd.h>
-#   include <termios.h>
-#   include <sys/ioctl.h>
-#include <signal.h>
-
 using namespace std;
 using namespace __pcli_private;
 
@@ -41,16 +36,28 @@ int main()
     std::cout << s.row << " " << s.col << std::endl;
     t.enable_mouse();
 
-    //signal(SIGINT, SIG_IGN);
-
     while (1)
     {
         terminal::op_event e;
         t.wait_a_event(e);
         if (e.type == terminal::op_type::KEY)
-            if (e._key == terminal::KEY_CTRL_G)
+            if (e._key == terminal::KEY_CTRL_K)
                 break;
-            else t.printf("%s", t.key_name(e._key));
+        switch (e.type)
+        {
+        case terminal::op_type::KEY:
+        {
+            t.printf("%s", t.key_name(e._key));
+            break;
+        }
+        case terminal::op_type::MOUSE:
+        {
+            t.printf("%s\n", ter_event_info(e));
+            break;
+        }
+        default:
+            break;
+        }
     }
     if (!t.active_main_screen())
     {

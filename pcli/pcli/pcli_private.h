@@ -9,7 +9,7 @@
 #   include <Windows.h>
 #endif
 
-#define __NON_EXPORT static
+//#define __NON_EXPORT static
 
 namespace __pcli_private
 {
@@ -158,7 +158,8 @@ namespace __pcli_private
         typedef unsigned int keyval;
         enum class op_type
         {
-            FAILED, MOUSE, KEY, SIZE
+            FAILED, MOUSE, KEY, SIZE,
+            __PRIVATE_IGNORE
         };
         enum _op_flag
         {

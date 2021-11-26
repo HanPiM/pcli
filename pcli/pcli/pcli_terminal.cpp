@@ -102,6 +102,7 @@ bool terminal::init()
     )); _CHECK_ED();
     _ENSURE(SetConsoleMode(hstdin, stdin_oldmode & (~ENABLE_PROCESSED_INPUT)))
         (hstdin); _CHECK_ED();
+    stdin_oldmode &= (~ENABLE_PROCESSED_INPUT);
 #else
     struct termios term;
     tcgetattr(STDIN_FILENO, &term);
@@ -332,7 +333,6 @@ bool terminal::enable_seq(bool flag)
     if (flag)
     {
        inmode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
-       //inmode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
        outmode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
        errmode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
     }
@@ -457,7 +457,6 @@ const char* terminal::key_name(keyval val)
     return buffer;
 }
 
-
 int terminal::getchar_no_block()
 {
 #if __IS_WIN
@@ -478,9 +477,144 @@ int terminal::getchar_no_block()
 
 bool terminal::try_get_event_form_seq(op_event& e)
 {
-    //int ch = getchar_no_block();
 
-    return false;// true;
+#define _GET_CONTROL_KEY(_ch) do{\
+                    _ch = getchar_no_block() - '0' - 1;\
+                    if (_ch & 1)e._key |= OP_WITH_SHIFT;\
+                    if (_ch & 2)e._key |= OP_WITH_ALT;\
+                    if (_ch & 4)e._key |= OP_WITH_CTRL;\
+                    _ch = getchar_no_block();\
+                }while(0)
+
+
+    int ch = getchar_no_block();
+    if (ch < 0)return false;
+    e.type = op_type::KEY;
+    e._key = 0;
+    if (ch == '[')
+    {
+        ch = getchar_no_block();
+        if (ch < 0)
+        {
+            e.type = op_type::KEY;
+            e._key = '[' | OP_WITH_ALT;
+            return true;
+        }
+        if (ch == '<')
+        {
+            e.type = op_type::MOUSE;
+            char buf[100], tmp;
+            int len = 0, flag, r, c, eflags = 0;
+            while (ch >= 0 && ch != 'm' && ch != 'M')
+                ch = buf[len++] = getchar_no_block();
+            buf[len] = 0;
+            sscanf(buf, "%d;%d;%d%c", &flag, &r, &c, &tmp);
+            e._mouse.pos = coord(r, c);
+            if (flag & (1 << 2))eflags |= OP_WITH_SHIFT;
+            if (flag & (1 << 3))eflags |= OP_WITH_ALT;
+            if (flag & (1 << 4))eflags |= OP_WITH_CTRL;
+            if (flag & (1 << 5))
+            {
+                eflags |= OP_WITH_MOUSE_MOVED;
+                if (e._mouse.pos == last_mouse_pos)
+                {
+                    e.type = op_type::__PRIVATE_IGNORE;
+                    return false;
+                }
+                last_mouse_pos = e._mouse.pos;
+            }
+            if (flag & (1 << 6))
+            {
+                eflags |= OP_WITH_MOUSE_WHEELED;
+                eflags |= (flag & 3);
+            }
+            else eflags |= ((flag & 3) + 1);
+            if (ch == 'M')eflags |= OP_WITH_MOUSE_DOWN;
+
+            e._mouse.flags = eflags;
+            return true;
+        }
+        while (1)
+        {
+            switch (ch)
+            {
+            case 'A':
+            case 'B':
+            case 'C':
+            case 'D':
+            {
+                e._key |= (KEY_UP + ch - 'A');
+                break;
+            }
+            case 'F':e._key |= KEY_END; break;
+            case 'H':e._key |= KEY_HOME; break;
+            case 'P':
+            case 'Q':
+            case 'R':
+            case 'S':e._key |= (KEY_F1 + ch - 'P'); break;
+            case '1':
+            {
+                ch = getchar_no_block();
+                if (ch == ';')
+                {
+                    _GET_CONTROL_KEY(ch);
+                    continue;
+                }
+                if (ch == '5')e._key = KEY_F5;
+                else e._key = (KEY_F6 + ch - '7');
+                ch = getchar_no_block();
+                if (ch == ';')
+                {
+                    _GET_CONTROL_KEY(ch);
+                }
+                break;
+            }
+            case '2':
+            {
+                ch = getchar_no_block();
+                if (ch == '~')e._key = KEY_INSERT;
+                else if (ch <= '1')e._key = (KEY_F9 + ch - '0');
+                else e._key = (KEY_F11 + ch - '3');
+                ch = getchar_no_block();
+                if (ch == ';')
+                {
+                    _GET_CONTROL_KEY(ch);
+                }
+                break;
+            }
+            case '3':
+            {
+                e._key = KEY_DELETE;
+                ch = getchar_no_block();
+                if (ch == ';')
+                    _GET_CONTROL_KEY(ch);
+                break;
+            }
+            case '5':
+            case '6':
+            {
+                e._key = (KEY_PAGE_UP + ch - '5');
+                ch = getchar_no_block();
+                if (ch == ';')
+                    _GET_CONTROL_KEY(ch);
+                break;
+            }
+            default:
+                break;
+            }
+            break;
+        }
+    }
+    else if (ch == 'O')
+    {
+        ch = getchar_no_block();
+        e._key = KEY_F1 + ch - 'P';
+    }
+    else
+    {
+        e._key = ch | OP_WITH_ALT;
+    }
+    return true;
 }
 
 #if __IS_WIN
@@ -531,7 +665,7 @@ void terminal::wait_a_event(op_event& e)
             return;
         }
 
-        Sleep(1);
+        //Sleep(1);
 
         if (!GetNumberOfConsoleInputEvents(hstdin, &n))continue;
         if (n == 0)continue;
@@ -611,6 +745,7 @@ void terminal::wait_a_event(op_event& e)
                 if (ch == KEY_ESC)
                 {
                     if (try_get_event_form_seq(e))return;
+                    else if (e.type == op_type::__PRIVATE_IGNORE)continue;
                 }
             }
             if (tmp & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED))

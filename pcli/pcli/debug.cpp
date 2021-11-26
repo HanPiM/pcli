@@ -1,6 +1,10 @@
 #include "pcli_private.h"
 using namespace __pcli_private;
 
+#if __IS_WIN
+#define strcat strcat_s
+#endif
+
 const char* ter_event_info(const terminal::op_event& in_op)
 {
     static char buffer[510] = "";
@@ -42,8 +46,6 @@ const char* ter_event_info(const terminal::op_event& in_op)
                     strcat(buffer, "{MBtn"); break;
                 case terminal::MOUSE_RBTN:
                     strcat(buffer, "{RBtn"); break;
-                //default:
-                    //strcat(buffer, "{NoBtnDown}"); break;
                 }
                 if (flags & 3)
                 {
